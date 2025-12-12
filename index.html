@@ -1,0 +1,155 @@
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics.js";
+  import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+  // CONFIGURACIÓN LIMPIA
+  const firebaseConfig = {
+    apiKey: "AIzaSyBWmA8OsE3gJvSCyHBWxU2lARaUm4PpGV4",
+    authDomain: "esp32-93c71.firebaseapp.com",
+    databaseURL: "https://esp32-93c71-default-rtdb.firebaseio.com",
+    projectId: "esp32-93c71",
+    storageBucket: "esp32-93c71.firebasestorage.app",
+    messagingSenderId: "905221459618",
+    appId: "1:905221459618:web:1dd776bb3ebff9b20c51fb",
+    measurementId: "G-85GFZPVSPB"
+  };
+
+  // INICIALIZACIÓN
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+  const db = getDatabase(app);
+
+  // IDS de tus sensores (SIN SALTOS DE LÍNEA)
+  const sensorIDs = [
+    "0x280xD00x20xB20x00x00x00xCF",
+    "0x280xB60x300x200x730x230xB0xE0",
+    "0x280x410xE80x160x400x240xB0x62",
+    "0x280x430x860xD0x730x230xB0x47"
+  ];
+
+  const labels = ["Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4"];
+
+  const lastValues = [[], [], [], []];
+  const MAX_POINTS = 20;
+
+  // CHART
+  const ctx = document.getElementById("chart").getContext("2d");
+  const colors = [
+    "rgba(249,115,22,0.9)",
+    "rgba(59,130,246,0.9)",
+    "rgba(16,185,129,0.9)",
+    "rgba(236,72,153,0.9)"
+  ];
+
+  const chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: colors.map((c, i) => ({
+        label: labels[i],
+        data: [],
+        borderColor: c,
+        fill: false,
+        pointRadius: 2,
+        tension: 0.25
+      }))
+    },
+    options: {
+      animations: false,
+      scales: {
+        y: { suggestedMin: -10, suggestedMax: 60 }
+      }
+    }
+  });
+
+  // ELEMENTOS UI
+  const tempEls = [0,1,2,3].map(i=>document.getElementById("temp-"+i));
+  const fillEls = [0,1,2,3].map(i=>document.getElementById("thermo-fill-"+i));
+  const labelEls = [0,1,2,3].map(i=>document.getElementById("label-"+i));
+  const alarmSound = document.getElementById("alarm-sound");
+  const statusIndicator = document.getElementById("statusIndicator");
+  const alarmThreshold = 45;
+  const alerted = [false,false,false,false];
+
+  document.getElementById('alarm-threshold').innerText = alarmThreshold + "°C";
+
+  // LISTENER → temperatures
+  const tempsRef = ref(db, "temperatures");
+
+  onValue(tempsRef, snap => {
+    const data = snap.val() || {};
+
+    sensorIDs.forEach((id, i) => {
+      const node = data[id];
+      const v = node?.value ?? null;
+
+      if (v === null || v === -127) {
+        tempEls[i].innerText = "-- °C";
+        fillEls[i].style.height = "0%";
+        return;
+      }
+
+      // actualizar UI
+      tempEls[i].innerText = v.toFixed(2) + " °C";
+
+      const pct = Math.min(100, Math.max(0, (v + 10) / 70 * 100));
+      fillEls[i].style.height = pct + "%";
+      fillEls[i].innerText = v.toFixed(1) + "°";
+
+      // alarma
+      if (v >= alarmThreshold && !alerted[i]) {
+        alerted[i] = true;
+        alarmSound.play();
+        Swal.fire({
+          title: `ALERTA: ${labels[i]}`,
+          text: `Temperatura ${v.toFixed(2)} °C`,
+          icon: "warning"
+        });
+      } else if (v < alarmThreshold) {
+        alerted[i] = false;
+      }
+
+      // gráfica
+      if (lastValues[i].length >= MAX_POINTS) lastValues[i].shift();
+      lastValues[i].push(v);
+    });
+
+    // actualizar gráfica
+    const maxLen = Math.max(...lastValues.map(a => a.length));
+    chart.data.labels = Array(maxLen).fill("");
+    chart.data.datasets.forEach((ds, i) => ds.data = lastValues[i]);
+    chart.update();
+  });
+
+  // LISTENER → status
+  const statusRef = ref(db, "status");
+
+  onValue(statusRef, snap => {
+    const s = snap.val();
+    renderStatus(s);
+  });
+
+  function renderStatus(s) {
+    statusIndicator.innerHTML = "";
+    const dot = document.createElement("span");
+    const text = document.createElement("span");
+
+    dot.className = "inline-block w-3 h-3 rounded-full";
+    text.className = "ml-2 text-sm";
+
+    if (!s?.lastUpdate) {
+      dot.style.background = "#ef4444";
+      text.innerText = "Sin conexión";
+    } else {
+      dot.style.background = "#10b981";
+      text.innerText = "Conectado (" +
+        new Date(s.lastUpdate * 1000).toLocaleTimeString() + ")";
+    }
+
+    statusIndicator.appendChild(dot);
+    statusIndicator.appendChild(text);
+  }
+
+  lucide.createIcons();
+</script>
